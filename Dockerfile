@@ -7,6 +7,9 @@ WORKDIR /app
 # Copy all files from the current directory to the container
 COPY . .
 
+# Install ffmpeg on the VPS (Debian-based)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Ensure the executable has the correct permissions
 RUN chmod +x N_m3u8DL-RE.exe
 
