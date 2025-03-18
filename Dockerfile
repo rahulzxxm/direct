@@ -10,8 +10,8 @@ COPY . .
 # Install ffmpeg on the VPS (Debian-based)
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Ensure the executable has the correct permissions
-RUN chmod +x N_m3u8DL-RE.exe
+# Ensure the Linux executable has the correct permissions
+RUN chmod +x N_m3u8DL-RE
 
 # Install dependencies
 RUN pip install -r requirements.txt
