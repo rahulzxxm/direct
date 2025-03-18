@@ -10,7 +10,7 @@ from pyrogram.types import Message
 # Telegram API credentials
 API_ID = "22609670"
 API_HASH = "3506d8474ad1f4f5e79b7c52a5c3e88d"
-BOT_TOKEN = "7805856791:AAE_9bEkeN_b9nJLwcLrHigf6bhzXvJACKA"
+BOT_TOKEN = "7814158198:AAEOvS9q-bLhUeHQrHcM-Zs8UIQuVrRSSSg"
 
 # Linux defaults for VPS deployment
 FFMPEG_PATH = "ffmpeg"
