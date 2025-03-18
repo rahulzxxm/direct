@@ -1,20 +1,17 @@
-# Use an appropriate base image
+# Use the official Python 3.9 image as the base
 FROM python:3.9
 
-# Set the working directory inside the container
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy your project files into the container
+# Copy all files from the current directory (repo) to the container
 COPY . .
 
-# Install required packages (ffmpeg, wget, and tar)
-RUN apt-get update && apt-get install -y ffmpeg wget tar && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg (and any other dependencies you might need)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Download and extract the Linux binary for N_m3u8DL-RE
-RUN wget -O N_m3u8DL-RE_linux-x64.tar.gz "https://github.com/nilaoda/N_m3u8DL-RE/releases/download/N_m3u8DL-RE_v0.3.0-beta/N_m3u8DL-RE_v0.3.0-beta_linux-x64.tar.gz" && \
-    tar -xzf N_m3u8DL-RE_linux-x64.tar.gz && \
-    chmod +x N_m3u8DL-RE && \
-    rm N_m3u8DL-RE_linux-x64.tar.gz
+# Ensure the Linux executable for N_m3u8DL-RE is executable
+RUN chmod +x N_m3u8DL-RE
 
 # Install Python dependencies
 RUN pip install -r requirements.txt
