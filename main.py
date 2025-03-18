@@ -53,10 +53,8 @@ def download_video_json(entry, temp_dir):
     mpd = entry["mpd"]
     name = sanitize_filename(entry["name"])
     keys = entry.get("keys", [])
-
     if not os.path.isfile(DOWNLOADER_PATH):
         raise Exception("Downloader tool is missing!")
-
     command = [
         DOWNLOADER_PATH,
         mpd,
@@ -69,10 +67,8 @@ def download_video_json(entry, temp_dir):
     ]
     for key in keys:
         command.extend(["--key", key])
-    
     os.makedirs(temp_dir, exist_ok=True)
     command.extend(["--save-dir", temp_dir])
-
     logging.debug("Running command (JSON): %s", " ".join(command))
     try:
         result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -89,7 +85,6 @@ def process_json_file(client, message: Message):
         message.reply_text("JSON file received. Processing...")
         with open(file_path, "r") as f:
             data = json.load(f)
-
         temp_dir = SAVE_DIR
         for entry in data:
             name = sanitize_filename(entry["name"])
@@ -99,7 +94,6 @@ def process_json_file(client, message: Message):
                 if not os.path.exists(video_path):
                     message.reply_text(f"Download failed for {name}: File not found")
                     continue
-
                 message.reply_text(f"Download complete. Starting upload for: {name}")
                 start_time = time.time()
                 client.send_video(
@@ -119,14 +113,13 @@ def process_json_file(client, message: Message):
                 logging.error("Error processing JSON entry for %s: %s", name, str(e))
                 message.reply_text(f"Error processing {name}: {str(e)}")
                 continue
-
         message.reply_text("All videos processed successfully!")
     except Exception as e:
         logging.error("Error in JSON processing: %s", str(e))
         message.reply_text(f"An error occurred: {str(e)}")
 
 ###############################
-# TXT file processing
+# TXT file processing (file input)
 ###############################
 def process_txt_file(client, message: Message):
     try:
@@ -134,38 +127,44 @@ def process_txt_file(client, message: Message):
         message.reply_text("Text file received. Processing...")
         with open(file_path, "r", encoding="utf-8") as f:
             input_text = f.read()
-
-        # Updated regex based on the barrier description:
-        # It expects a name in parentheses, then any characters until the literal "(video):"
-        # Then the URL (captured non-greedily) up to the literal "HLS_KEY=" and then the key.
+        # Process as three-line entries if possible
+        lines = [line.strip() for line in input_text.strip().splitlines() if line.strip()]
         videos = []
-        for line in input_text.strip().splitlines():
-            match = re.match(r"\((.*?)\).*?\(video\):(.*?)HLS_KEY=(.+)", line)
-            if match:
-                title, url, key = match.groups()
-                videos.append((title.strip(), url.strip(), key.strip()))
-
+        if len(lines) % 3 == 0:
+            for i in range(0, len(lines), 3):
+                title = lines[i]
+                url = lines[i + 1]
+                key_line = lines[i + 2]
+                key = key_line[len("HLS_KEY="):].strip() if key_line.startswith("HLS_KEY=") else key_line
+                videos.append((title, url, key))
+        else:
+            # Fallback to using barrier regex
+            for line in lines:
+                match = re.match(r"\((.*?)\).*?\(video\):(.*?)HLS_KEY=(.+)", line)
+                if match:
+                    title, url, key = match.groups()
+                    videos.append((title.strip(), url.strip(), key.strip()))
         if not videos:
             message.reply_text("No valid video links found in the text file.")
             return
-
         os.makedirs(SAVE_DIR, exist_ok=True)
         for title, url, key in videos:
             safe_title = sanitize_filename(title)
             message.reply_text(f"Starting download for: {title}")
             temp_dir = os.path.join(SAVE_DIR, safe_title + "_temp")
             os.makedirs(temp_dir, exist_ok=True)
-
             command = [
                 DOWNLOADER_PATH,
                 url,
                 "--save-dir", temp_dir,
                 "--save-name", safe_title,
                 "--custom-hls-key", key,
+                "-M", "format=mp4",
                 "--ffmpeg-binary-path", FFMPEG_PATH,
-                "--auto-select"
+                "--auto-select",
+                "--log-level", "DEBUG"
             ]
-            logging.debug("Running command (TXT): %s", " ".join(command))
+            logging.debug("Running command (TXT file): %s", " ".join(command))
             try:
                 result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 logging.info("N_m3u8DL-RE output: %s", result.stdout)
@@ -174,17 +173,13 @@ def process_txt_file(client, message: Message):
                 logging.error(err_msg)
                 message.reply_text(f"Error processing {title}: {err_msg}")
                 continue
-
-            # Look for an audio file (with .m4a extension)
             audio_file = None
             for file in os.listdir(temp_dir):
                 if file.startswith(safe_title) and file.endswith(".m4a"):
                     audio_file = os.path.join(temp_dir, file)
                     break
-
             video_file = os.path.join(temp_dir, safe_title + ".mp4")
             final_output = os.path.join(SAVE_DIR, safe_title + ".mp4")
-
             if audio_file:
                 merge_command = [
                     FFMPEG_PATH,
@@ -203,7 +198,6 @@ def process_txt_file(client, message: Message):
                     logging.error(err_msg)
                     message.reply_text(f"Error processing {title}: {err_msg}")
                     continue
-
                 if os.path.exists(video_file):
                     os.remove(video_file)
                 if os.path.exists(audio_file):
@@ -223,7 +217,6 @@ def process_txt_file(client, message: Message):
                 except OSError:
                     shutil.rmtree(temp_dir)
                     logging.info("Force removed temp directory: %s", temp_dir)
-
             message.reply_text(f"Download complete. Starting upload for: {title}")
             start_time = time.time()
             client.send_video(
@@ -239,14 +232,111 @@ def process_txt_file(client, message: Message):
             if os.path.exists(final_output):
                 os.remove(final_output)
                 logging.info("Deleted final video file: %s", final_output)
-
         message.reply_text("All videos processed successfully!")
     except Exception as e:
         logging.error("Error in TXT file processing: %s", str(e))
         message.reply_text(f"An error occurred while processing text file: {str(e)}")
 
 ###############################
-# General file handler
+# Text message processing (direct input)
+###############################
+@bot.on_message(filters.private & filters.text)
+def process_text_input(client, message: Message):
+    text = message.text.strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) != 3:
+        message.reply_text("Please send exactly three lines: first line for the name, second for the URL, and third for the key (optionally starting with 'HLS_KEY=').")
+        return
+    title = lines[0]
+    url = lines[1]
+    key_line = lines[2]
+    key = key_line[len("HLS_KEY="):].strip() if key_line.startswith("HLS_KEY=") else key_line
+    safe_title = sanitize_filename(title)
+    message.reply_text(f"Starting download for: {title}")
+    temp_dir = os.path.join(SAVE_DIR, safe_title + "_temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    command = [
+        DOWNLOADER_PATH,
+        url,
+        "--save-dir", temp_dir,
+        "--save-name", safe_title,
+        "--custom-hls-key", key,
+        "-M", "format=mp4",
+        "--ffmpeg-binary-path", FFMPEG_PATH,
+        "--auto-select",
+        "--log-level", "DEBUG"
+    ]
+    logging.debug("Running command (direct text input): %s", " ".join(command))
+    try:
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        logging.info("N_m3u8DL-RE output: %s", result.stdout)
+    except subprocess.CalledProcessError as e:
+        err_msg = f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}"
+        logging.error(err_msg)
+        message.reply_text(f"Error processing {title}: {err_msg}")
+        return
+    audio_file = None
+    for file in os.listdir(temp_dir):
+        if file.startswith(safe_title) and file.endswith(".m4a"):
+            audio_file = os.path.join(temp_dir, file)
+            break
+    video_file = os.path.join(temp_dir, safe_title + ".mp4")
+    final_output = os.path.join(SAVE_DIR, safe_title + ".mp4")
+    if audio_file:
+        merge_command = [
+            FFMPEG_PATH,
+            "-i", video_file,
+            "-i", audio_file,
+            "-c:v", "copy",
+            "-c:a", "copy",
+            final_output
+        ]
+        logging.debug("Running ffmpeg merge command: %s", " ".join(merge_command))
+        try:
+            result = subprocess.run(merge_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            logging.info("ffmpeg merge output: %s", result.stdout)
+        except subprocess.CalledProcessError as e:
+            err_msg = f"Merging failed with exit code {e.returncode}. Stderr: {e.stderr}"
+            logging.error(err_msg)
+            message.reply_text(f"Error processing {title}: {err_msg}")
+            return
+        if os.path.exists(video_file):
+            os.remove(video_file)
+        if os.path.exists(audio_file):
+            os.remove(audio_file)
+        try:
+            os.rmdir(temp_dir)
+            logging.info("Removed temp directory: %s", temp_dir)
+        except OSError:
+            shutil.rmtree(temp_dir)
+            logging.info("Force removed temp directory: %s", temp_dir)
+    else:
+        final_output = video_file
+        message.reply_text(f"Warning: No audio file found for {title}, skipping merge.")
+        try:
+            os.rmdir(temp_dir)
+            logging.info("Removed temp directory: %s", temp_dir)
+        except OSError:
+            shutil.rmtree(temp_dir)
+            logging.info("Force removed temp directory: %s", temp_dir)
+    message.reply_text(f"Download complete. Starting upload for: {title}")
+    start_time = time.time()
+    client.send_video(
+        chat_id=message.chat.id,
+        video=final_output,
+        caption=f"Uploaded: {title}",
+        progress=lambda current, total: progress(current, total, message, title),
+        width=1920,
+        height=1080
+    )
+    end_time = time.time()
+    message.reply_text(f"Upload complete for {title}. Time taken: {end_time - start_time:.2f} seconds")
+    if os.path.exists(final_output):
+        os.remove(final_output)
+        logging.info("Deleted final video file: %s", final_output)
+
+###############################
+# General file handler for documents
 ###############################
 @bot.on_message(filters.private & filters.document)
 def handle_file(client, message: Message):
