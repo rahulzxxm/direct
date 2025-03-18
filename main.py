@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 import sys
+import shutil
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
@@ -52,7 +53,6 @@ def download_video_json(entry, temp_dir):
         "-mt",
         "--auto-select"
     ]
-
     for key in keys:
         command.extend(["--key", key])
 
@@ -60,10 +60,12 @@ def download_video_json(entry, temp_dir):
     command.extend(["--save-dir", temp_dir])
 
     try:
-        subprocess.run(command, check=True)
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        print("N_m3u8DL-RE output:", result.stdout)
         return os.path.join(temp_dir, f"{name}.mp4")
     except subprocess.CalledProcessError as e:
-        raise Exception(f"Download failed: {str(e)}")
+        error_details = f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}"
+        raise Exception(error_details)
 
 def process_json_file(client, message: Message):
     try:
@@ -76,7 +78,6 @@ def process_json_file(client, message: Message):
         for entry in data:
             name = sanitize_filename(entry["name"])
             message.reply_text(f"Starting download for: {name}")
-
             try:
                 # Download the video using the JSON-specific method
                 video_path = download_video_json(entry, temp_dir)
@@ -86,7 +87,6 @@ def process_json_file(client, message: Message):
 
                 message.reply_text(f"Download complete. Starting upload for: {name}")
                 start_time = time.time()
-
                 client.send_video(
                     chat_id=message.chat.id,
                     video=video_path,
@@ -95,13 +95,11 @@ def process_json_file(client, message: Message):
                     width=1920,
                     height=1080
                 )
-
                 end_time = time.time()
                 message.reply_text(f"Upload complete for {name}. Time taken: {end_time - start_time:.2f} seconds")
-
+                # Delete the downloaded file after upload
                 if os.path.exists(video_path):
                     os.remove(video_path)
-
             except Exception as e:
                 message.reply_text(f"Error processing {name}: {str(e)}")
                 continue
@@ -123,7 +121,6 @@ def process_txt_file(client, message: Message):
         # Parse the text file line by line using regex
         videos = []
         for line in input_text.strip().splitlines():
-            # Regex extracts: title, URL, and HLS key
             match = re.match(r"\((.*?)\)\s*\(.*?\)\s*\(video\):(.+?)HLS_KEY=(.+)", line)
             if match:
                 title, url, key = match.groups()
@@ -142,7 +139,6 @@ def process_txt_file(client, message: Message):
             temp_dir = os.path.join(SAVE_DIR, safe_title + "_temp")
             os.makedirs(temp_dir, exist_ok=True)
 
-            # Build the download command using the Linux downloader and ffmpeg
             command = [
                 DOWNLOADER_PATH,
                 url,
@@ -152,7 +148,11 @@ def process_txt_file(client, message: Message):
                 "--ffmpeg-binary-path", FFMPEG_PATH,
                 "--auto-select"
             ]
-            subprocess.run(command, check=True)
+            try:
+                result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                print("N_m3u8DL-RE output:", result.stdout)
+            except subprocess.CalledProcessError as e:
+                raise Exception(f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}")
 
             # Look for an audio file (with .m4a extension)
             audio_file = None
@@ -165,7 +165,6 @@ def process_txt_file(client, message: Message):
             final_output = os.path.join(SAVE_DIR, safe_title + ".mp4")
 
             if audio_file:
-                # Merge audio and video using ffmpeg (without re-encoding)
                 merge_command = [
                     FFMPEG_PATH,
                     "-i", video_file,
@@ -174,22 +173,33 @@ def process_txt_file(client, message: Message):
                     "-c:a", "copy",
                     final_output
                 ]
-                subprocess.run(merge_command, check=True)
+                try:
+                    result = subprocess.run(merge_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    print("ffmpeg merge output:", result.stdout)
+                except subprocess.CalledProcessError as e:
+                    raise Exception(f"Merging failed with exit code {e.returncode}. Stderr: {e.stderr}")
 
-                # Clean up temporary files after merging
+                # Clean up video and audio files
                 if os.path.exists(video_file):
                     os.remove(video_file)
                 if os.path.exists(audio_file):
                     os.remove(audio_file)
-                os.rmdir(temp_dir)
+                # Remove the temp directory if it's empty
+                try:
+                    os.rmdir(temp_dir)
+                except OSError:
+                    shutil.rmtree(temp_dir)
             else:
-                # No audio file found; use the downloaded video as-is
                 final_output = video_file
                 message.reply_text(f"Warning: No audio file found for {title}, skipping merge.")
+                # Attempt to remove temp directory if possible
+                try:
+                    os.rmdir(temp_dir)
+                except OSError:
+                    shutil.rmtree(temp_dir)
 
             message.reply_text(f"Download complete. Starting upload for: {title}")
             start_time = time.time()
-
             client.send_video(
                 chat_id=message.chat.id,
                 video=final_output,
@@ -198,11 +208,9 @@ def process_txt_file(client, message: Message):
                 width=1920,
                 height=1080
             )
-
             end_time = time.time()
             message.reply_text(f"Upload complete for {title}. Time taken: {end_time - start_time:.2f} seconds")
 
-            # Remove the final video file after upload if stored in SAVE_DIR
             if os.path.exists(final_output):
                 os.remove(final_output)
 
