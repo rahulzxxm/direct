@@ -5,8 +5,22 @@ import subprocess
 import time
 import sys
 import shutil
+import logging
 from pyrogram import Client, filters
 from pyrogram.types import Message
+
+# ---------------------
+# Logging configuration
+# ---------------------
+LOG_FILE = "vps_log.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 # Telegram API credentials
 API_ID = "22609670"
@@ -25,8 +39,8 @@ def progress(current, total, message, name):
     percent = current * 100 / total
     try:
         message.edit_text(f"Uploading {name}: {percent:.1f}%")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error("Progress update error: %s", str(e))
 
 def sanitize_filename(filename):
     # Replace any character that is not alphanumeric, underscore, or dash with an underscore.
@@ -55,17 +69,19 @@ def download_video_json(entry, temp_dir):
     ]
     for key in keys:
         command.extend(["--key", key])
-
+    
     os.makedirs(temp_dir, exist_ok=True)
     command.extend(["--save-dir", temp_dir])
 
+    logging.debug("Running command (JSON): %s", " ".join(command))
     try:
         result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        print("N_m3u8DL-RE output:", result.stdout)
+        logging.info("N_m3u8DL-RE output: %s", result.stdout)
         return os.path.join(temp_dir, f"{name}.mp4")
     except subprocess.CalledProcessError as e:
-        error_details = f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}"
-        raise Exception(error_details)
+        err_msg = f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}"
+        logging.error(err_msg)
+        raise Exception(err_msg)
 
 def process_json_file(client, message: Message):
     try:
@@ -79,7 +95,6 @@ def process_json_file(client, message: Message):
             name = sanitize_filename(entry["name"])
             message.reply_text(f"Starting download for: {name}")
             try:
-                # Download the video using the JSON-specific method
                 video_path = download_video_json(entry, temp_dir)
                 if not os.path.exists(video_path):
                     message.reply_text(f"Download failed for {name}: File not found")
@@ -97,15 +112,17 @@ def process_json_file(client, message: Message):
                 )
                 end_time = time.time()
                 message.reply_text(f"Upload complete for {name}. Time taken: {end_time - start_time:.2f} seconds")
-                # Delete the downloaded file after upload
                 if os.path.exists(video_path):
                     os.remove(video_path)
+                    logging.info("Deleted file: %s", video_path)
             except Exception as e:
+                logging.error("Error processing JSON entry for %s: %s", name, str(e))
                 message.reply_text(f"Error processing {name}: {str(e)}")
                 continue
 
         message.reply_text("All videos processed successfully!")
     except Exception as e:
+        logging.error("Error in JSON processing: %s", str(e))
         message.reply_text(f"An error occurred: {str(e)}")
 
 ###############################
@@ -118,10 +135,12 @@ def process_txt_file(client, message: Message):
         with open(file_path, "r", encoding="utf-8") as f:
             input_text = f.read()
 
-        # Parse the text file line by line using regex
+        # Updated regex based on the barrier description:
+        # It expects a name in parentheses, then any characters until the literal "(video):"
+        # Then the URL (captured non-greedily) up to the literal "HLS_KEY=" and then the key.
         videos = []
         for line in input_text.strip().splitlines():
-            match = re.match(r"\((.*?)\)\s*\(.*?\)\s*\(video\):(.+?)HLS_KEY=(.+)", line)
+            match = re.match(r"\((.*?)\).*?\(video\):(.*?)HLS_KEY=(.+)", line)
             if match:
                 title, url, key = match.groups()
                 videos.append((title.strip(), url.strip(), key.strip()))
@@ -134,8 +153,6 @@ def process_txt_file(client, message: Message):
         for title, url, key in videos:
             safe_title = sanitize_filename(title)
             message.reply_text(f"Starting download for: {title}")
-
-            # Create a temporary directory for this video
             temp_dir = os.path.join(SAVE_DIR, safe_title + "_temp")
             os.makedirs(temp_dir, exist_ok=True)
 
@@ -148,11 +165,15 @@ def process_txt_file(client, message: Message):
                 "--ffmpeg-binary-path", FFMPEG_PATH,
                 "--auto-select"
             ]
+            logging.debug("Running command (TXT): %s", " ".join(command))
             try:
                 result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                print("N_m3u8DL-RE output:", result.stdout)
+                logging.info("N_m3u8DL-RE output: %s", result.stdout)
             except subprocess.CalledProcessError as e:
-                raise Exception(f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}")
+                err_msg = f"Download failed with exit code {e.returncode}. Stderr: {e.stderr}"
+                logging.error(err_msg)
+                message.reply_text(f"Error processing {title}: {err_msg}")
+                continue
 
             # Look for an audio file (with .m4a extension)
             audio_file = None
@@ -173,30 +194,35 @@ def process_txt_file(client, message: Message):
                     "-c:a", "copy",
                     final_output
                 ]
+                logging.debug("Running ffmpeg merge command: %s", " ".join(merge_command))
                 try:
                     result = subprocess.run(merge_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                    print("ffmpeg merge output:", result.stdout)
+                    logging.info("ffmpeg merge output: %s", result.stdout)
                 except subprocess.CalledProcessError as e:
-                    raise Exception(f"Merging failed with exit code {e.returncode}. Stderr: {e.stderr}")
+                    err_msg = f"Merging failed with exit code {e.returncode}. Stderr: {e.stderr}"
+                    logging.error(err_msg)
+                    message.reply_text(f"Error processing {title}: {err_msg}")
+                    continue
 
-                # Clean up video and audio files
                 if os.path.exists(video_file):
                     os.remove(video_file)
                 if os.path.exists(audio_file):
                     os.remove(audio_file)
-                # Remove the temp directory if it's empty
                 try:
                     os.rmdir(temp_dir)
+                    logging.info("Removed temp directory: %s", temp_dir)
                 except OSError:
                     shutil.rmtree(temp_dir)
+                    logging.info("Force removed temp directory: %s", temp_dir)
             else:
                 final_output = video_file
                 message.reply_text(f"Warning: No audio file found for {title}, skipping merge.")
-                # Attempt to remove temp directory if possible
                 try:
                     os.rmdir(temp_dir)
+                    logging.info("Removed temp directory: %s", temp_dir)
                 except OSError:
                     shutil.rmtree(temp_dir)
+                    logging.info("Force removed temp directory: %s", temp_dir)
 
             message.reply_text(f"Download complete. Starting upload for: {title}")
             start_time = time.time()
@@ -210,12 +236,13 @@ def process_txt_file(client, message: Message):
             )
             end_time = time.time()
             message.reply_text(f"Upload complete for {title}. Time taken: {end_time - start_time:.2f} seconds")
-
             if os.path.exists(final_output):
                 os.remove(final_output)
+                logging.info("Deleted final video file: %s", final_output)
 
         message.reply_text("All videos processed successfully!")
     except Exception as e:
+        logging.error("Error in TXT file processing: %s", str(e))
         message.reply_text(f"An error occurred while processing text file: {str(e)}")
 
 ###############################
@@ -241,6 +268,7 @@ def restart_bot(client, message: Message):
         python_executable = sys.executable
         os.execl(python_executable, python_executable, *sys.argv)
     except Exception as e:
+        logging.error("Failed to restart: %s", str(e))
         message.reply_text(f"Failed to restart: {str(e)}")
 
 if __name__ == "__main__":
