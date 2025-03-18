@@ -12,10 +12,10 @@ API_ID = "22609670"
 API_HASH = "3506d8474ad1f4f5e79b7c52a5c3e88d"
 BOT_TOKEN = "7805856791:AAE_9bEkeN_b9nJLwcLrHigf6bhzXvJACKA"
 
-# Windows-specific paths for TXT file processing
-FFMPEG_PATH = r"C:\Users\becom\Downloads\Telegram Desktop\N_m3u8DL-RE_Beta_win-x64_20240828\N_m3u8DL-RE_Beta_win-x64\ffmpeg.exe"
-DOWNLOADER_PATH = r"C:\Users\becom\Downloads\Telegram Desktop\N_m3u8DL-RE_Beta_win-x64_20240828\N_m3u8DL-RE_Beta_win-x64\N_m3u8DL-RE.exe"
-SAVE_DIR = r"D:\GSAP 2025\Polity"
+# Linux defaults for VPS deployment
+FFMPEG_PATH = "ffmpeg"
+DOWNLOADER_PATH = "./N_m3u8DL-RE"
+SAVE_DIR = "downloads"
 
 # Initialize the bot
 bot = Client("video_downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -28,7 +28,7 @@ def progress(current, total, message, name):
         pass
 
 def sanitize_filename(filename):
-    # This function replaces any character that is not alphanumeric, underscore or dash with an underscore.
+    # Replace any character that is not alphanumeric, underscore, or dash with an underscore.
     return re.sub(r'[^a-zA-Z0-9_-]', '_', filename)
 
 ###############################
@@ -39,11 +39,11 @@ def download_video_json(entry, temp_dir):
     name = sanitize_filename(entry["name"])
     keys = entry.get("keys", [])
 
-    if not os.path.isfile("./N_m3u8DL-RE"):
-        raise Exception("N_m3u8DL-RE tool is missing!")
+    if not os.path.isfile(DOWNLOADER_PATH):
+        raise Exception("Downloader tool is missing!")
 
     command = [
-        "./N_m3u8DL-RE",
+        DOWNLOADER_PATH,
         mpd,
         "-M", "format=mp4",
         "--save-name", name,
@@ -72,7 +72,7 @@ def process_json_file(client, message: Message):
         with open(file_path, "r") as f:
             data = json.load(f)
 
-        temp_dir = "downloads"
+        temp_dir = SAVE_DIR
         for entry in data:
             name = sanitize_filename(entry["name"])
             message.reply_text(f"Starting download for: {name}")
@@ -142,17 +142,17 @@ def process_txt_file(client, message: Message):
             temp_dir = os.path.join(SAVE_DIR, safe_title + "_temp")
             os.makedirs(temp_dir, exist_ok=True)
 
-            # Build the download command using the Windows downloader
+            # Build the download command using the Linux downloader and ffmpeg
             command = [
-                f'"{DOWNLOADER_PATH}"',
-                f'"{url}"',
-                "--save-dir", f'"{temp_dir}"',
-                "--save-name", f'"{safe_title}"',
+                DOWNLOADER_PATH,
+                url,
+                "--save-dir", temp_dir,
+                "--save-name", safe_title,
                 "--custom-hls-key", key,
-                "--ffmpeg-binary-path", f'"{FFMPEG_PATH}"',
+                "--ffmpeg-binary-path", FFMPEG_PATH,
                 "--auto-select"
             ]
-            subprocess.run(" ".join(command), shell=True)
+            subprocess.run(command, check=True)
 
             # Look for an audio file (with .m4a extension)
             audio_file = None
@@ -167,14 +167,14 @@ def process_txt_file(client, message: Message):
             if audio_file:
                 # Merge audio and video using ffmpeg (without re-encoding)
                 merge_command = [
-                    f'"{FFMPEG_PATH}"',
-                    "-i", f'"{video_file}"',
-                    "-i", f'"{audio_file}"',
+                    FFMPEG_PATH,
+                    "-i", video_file,
+                    "-i", audio_file,
                     "-c:v", "copy",
                     "-c:a", "copy",
-                    f'"{final_output}"'
+                    final_output
                 ]
-                subprocess.run(" ".join(merge_command), shell=True)
+                subprocess.run(merge_command, check=True)
 
                 # Clean up temporary files after merging
                 if os.path.exists(video_file):
