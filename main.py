@@ -28,9 +28,38 @@ API_HASH = "3506d8474ad1f4f5e79b7c52a5c3e88d"
 BOT_TOKEN = "7814158198:AAEOvS9q-bLhUeHQrHcM-Zs8UIQuVrRSSSg"
 
 # Linux defaults for VPS deployment
+# Initially set ffmpeg path to "ffmpeg"; the check will update to an absolute path if available.
 FFMPEG_PATH = "ffmpeg"
 DOWNLOADER_PATH = "./N_m3u8DL-RE"
 SAVE_DIR = "downloads"
+
+def check_dependencies():
+    # Check if the downloader tool exists and is executable.
+    if not os.path.isfile(DOWNLOADER_PATH):
+        raise Exception(f"Downloader tool not found at {DOWNLOADER_PATH}!")
+    if not os.access(DOWNLOADER_PATH, os.X_OK):
+        logging.warning(f"{DOWNLOADER_PATH} is not executable. Attempting to chmod +x")
+        os.chmod(DOWNLOADER_PATH, 0o755)
+        if not os.access(DOWNLOADER_PATH, os.X_OK):
+            raise Exception("Downloader tool is still not executable!")
+    logging.info(f"{DOWNLOADER_PATH} is present and executable.")
+
+    # Check for ffmpeg using shutil.which.
+    global FFMPEG_PATH
+    ffmpeg_found = shutil.which(FFMPEG_PATH)
+    if not ffmpeg_found:
+        ffmpeg_found = shutil.which("ffmpeg")
+        if ffmpeg_found:
+            FFMPEG_PATH = ffmpeg_found
+            logging.info(f"ffmpeg found at {FFMPEG_PATH}")
+        else:
+            raise Exception("ffmpeg not found in PATH!")
+    else:
+        FFMPEG_PATH = ffmpeg_found
+        logging.info(f"ffmpeg found at {FFMPEG_PATH}")
+
+# Call dependency check before starting the bot
+check_dependencies()
 
 # Initialize the bot
 bot = Client("video_downloader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -53,8 +82,6 @@ def download_video_json(entry, temp_dir):
     mpd = entry["mpd"]
     name = sanitize_filename(entry["name"])
     keys = entry.get("keys", [])
-    if not os.path.isfile(DOWNLOADER_PATH):
-        raise Exception("Downloader tool is missing!")
     command = [
         DOWNLOADER_PATH,
         mpd,
@@ -127,10 +154,10 @@ def process_txt_file(client, message: Message):
         message.reply_text("Text file received. Processing...")
         with open(file_path, "r", encoding="utf-8") as f:
             input_text = f.read()
-        # Process as three-line entries if possible
         lines = [line.strip() for line in input_text.strip().splitlines() if line.strip()]
         videos = []
         if len(lines) % 3 == 0:
+            # Each entry is three lines: title, URL, key (with optional HLS_KEY= prefix)
             for i in range(0, len(lines), 3):
                 title = lines[i]
                 url = lines[i + 1]
@@ -138,7 +165,7 @@ def process_txt_file(client, message: Message):
                 key = key_line[len("HLS_KEY="):].strip() if key_line.startswith("HLS_KEY=") else key_line
                 videos.append((title, url, key))
         else:
-            # Fallback to using barrier regex
+            # Fallback using barrier regex
             for line in lines:
                 match = re.match(r"\((.*?)\).*?\(video\):(.*?)HLS_KEY=(.+)", line)
                 if match:
@@ -336,7 +363,7 @@ def process_text_input(client, message: Message):
         logging.info("Deleted final video file: %s", final_output)
 
 ###############################
-# General file handler for documents
+# Document file handler for documents
 ###############################
 @bot.on_message(filters.private & filters.document)
 def handle_file(client, message: Message):
