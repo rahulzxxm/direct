@@ -25,7 +25,7 @@ logging.basicConfig(
 # Telegram API credentials
 API_ID = "22609670"
 API_HASH = "3506d8474ad1f4f5e79b7c52a5c3e88d"
-BOT_TOKEN = "7814158198:AAEOvS9q-bLhUeHQrHcM-Zs8UIQuVrRSSSg"
+BOT_TOKEN = "8051949636:AAHAMwENBTrDlzWRSAQRvHSteTnJXgHIP3o"
 
 # Linux defaults for VPS deployment
 # Initially set ffmpeg path to "ffmpeg"; the check will update to an absolute path if available.
