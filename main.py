@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Load .env
 load_dotenv()
-API_ID = int(os.getenv("API_ID", 0))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = 22609670
+API_HASH = "3506d8474ad1f4f5e79b7c52a5c3e88d"
+BOT_TOKEN = "7573531892:AAHLInXIBQkZiq9x9fiR2LSO0VyMk_8YbXc"
+
 
 # Bot client
 app = Client("spayee_uploader_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
